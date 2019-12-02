@@ -1,0 +1,11 @@
+dist: trusty
+language: scala
+jdk:
+  - oraclejdk8
+  - oraclejdk9
+sudo: false
+cache:
+  directories:
+  - $HOME/.ivy2
+  - $HOME/.sbt
+script: sbt '^ testOnly'
