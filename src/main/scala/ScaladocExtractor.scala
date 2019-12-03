@@ -23,44 +23,51 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     sourceGenerators in Test += (Def.task {
       val log = streams.value.log
       val mdir = (sourceManaged in Test).value
-      val src = (sourceDirectories in Compile).value.view.flatMap { d =>
-        if (!d.exists || !d.isDirectory) {
-          List.empty[(Path, File)]
-        } else {
-          val dp = d.toPath
 
-          FileUtils.listFiles(d, Array("scala"), true).asScala.toSeq.map { f =>
-            dp.relativize(f.toPath) -> f
+      if (!autoScalaLibrary.value) {
+        log.warn(s"Skip Scaladoc extraction on non-Scala project: ${thisProject.value.id}")
+        Seq.empty
+      } else {
+        val src = (sourceDirectories in Compile).value.view.flatMap { d =>
+          if (!d.exists || !d.isDirectory) {
+            List.empty[(Path, File)]
+          } else {
+            val dp = d.toPath
+
+            FileUtils.listFiles(d, Array("scala"), true).
+              asScala.toSeq.map { f =>
+              dp.relativize(f.toPath) -> f
+            }
           }
         }
-      }
 
-      val mngedPath = mdir.toPath
+        val mngedPath = mdir.toPath
 
-      src.flatMap {
-        case (pth, f) =>
+        src.flatMap {
+          case (pth, f) =>
 
-          val content = scala.io.Source.fromFile(f).getLines
+            val content = scala.io.Source.fromFile(f).getLines
 
-          if (!content.hasNext) {
-            List.empty
-          } else {
-            log.debug(s"Extracting Scaladoc examples from $f ...")
+            if (!content.hasNext) {
+              List.empty
+            } else {
+              log.debug(s"Extracting Scaladoc examples from $f ...")
 
-            val outPath: Path = {
-              val parent = pth.getParent
+              val outPath: Path = {
+                val parent = pth.getParent
 
-              if (parent == null) mngedPath
-              else mngedPath.resolve(parent)
+                if (parent == null) mngedPath
+                else mngedPath.resolve(parent)
+              }
+              val outDir = outPath.toFile
+
+              if (!outDir.exists) {
+                outDir.mkdirs()
+              }
+
+              parse(log, outDir, pth, 1L, content.next, content, List.empty)
             }
-            val outDir = outPath.toFile
-
-            if (!outDir.exists) {
-              outDir.mkdirs()
-            }
-
-            parse(log, outDir, pth, 1L, content.next, content, List.empty)
-          }
+        }
       }
     }).taskValue)
 
