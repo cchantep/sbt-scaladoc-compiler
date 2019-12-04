@@ -35,7 +35,7 @@ You need to update the `project/plugins.sbt`.
 resolvers ++= Seq(
   "Tatami Releases" at "https://raw.github.com/cchantep/tatami/master/releases")
 
-addSbtPlugin("cchantep" % "sbt-scaladoc-compiler" % "0.1")
+addSbtPlugin("cchantep" % "sbt-scaladoc-compiler" % "0.2")
 ```
 
 *See a SBT build [using this plugin](https://github.com/ReactiveMongo/Reactivemongo-BSON/blob/master/project/plugins.sbt).*
@@ -59,6 +59,20 @@ Each code sample need to be standalone:
 
 - all imports explicitly specified,
 - no call to private members.
+
+In case a code example must be excluded/skipped, the setting `scaladocExtractorSkipToken` can be used (default: `"// not compilable"`).
+
+```scala
+/**
+ * Lorem ipsum
+ *
+ * {{{
+ * // not compilable: some details why (as also displayed in Scaladoc)
+ * foo bar ... anyway it's not compiled (if any good reason)
+ * }}}
+ */
+def foo(s: String): Int = s.size
+```
 
 ## Build
 
