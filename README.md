@@ -42,6 +42,17 @@ addSbtPlugin("cchantep" % "sbt-scaladoc-compiler" % "0.1")
 
 Then, any time `test:compile` task is executed in SBT, the Scaladoc examples will be compiled along.
 
+**In case of SBT [Multi-Project](https://www.scala-sbt.org/1.x/docs/Multi-Project.html)**
+
+It may be required to disable this plugin on the aggregation if some examples in files of the sub-project require some depen
+dencies specific to the sub-project (not available at the aggregation time).
+
+```scala
+lazy val root = Project(id = "...", base = file(".")).
+  aggregate(/* ... */).
+  disablePlugins(ScaladocExtractorPlugin)
+```
+
 ## Extraction behaviour
 
 Each code sample need to be standalone:
