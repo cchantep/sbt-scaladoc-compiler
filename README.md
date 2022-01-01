@@ -35,7 +35,7 @@ You need to update the `project/plugins.sbt`.
 resolvers ++= Seq(
   "Tatami Releases" at "https://raw.github.com/cchantep/tatami/master/releases")
 
-addSbtPlugin("cchantep" % "sbt-scaladoc-compiler" % "0.2")
+addSbtPlugin("cchantep" % "sbt-scaladoc-compiler" % "0.3")
 ```
 
 *See a SBT build [using this plugin](https://github.com/ReactiveMongo/Reactivemongo-BSON/blob/master/project/plugins.sbt).*

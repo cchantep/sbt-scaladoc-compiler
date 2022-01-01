@@ -23,8 +23,13 @@ object ScaladocExtractorPlugin extends AutoPlugin {
   }
 
   override def projectSettings = Seq(
-    scalacOptions in (Test, doc) ++= List(
-      "-skip-packages", "scaladocextractor"),
+    scalacOptions in (Test, doc) ++= {
+      if (scalaBinaryVersion.value == "3") {
+        List("-skip-by-id:scaladocextractor")
+      } else {
+        List("-skip-packages", "scaladocextractor")
+      }
+    },
     autoImport.scaladocExtractorSkipToken := "// not compilable",
     sourceGenerators in Test += (Def.task {
       val log = streams.value.log
