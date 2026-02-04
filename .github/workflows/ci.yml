@@ -19,13 +19,16 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Setup JDK ${{ matrix.java }}
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: ${{ matrix.java }}
         cache: 'sbt'
+
+    - name: Setup sbt
+      uses: sbt/setup-sbt@v1
         
     - name: Run tests with SBT cross-build
       run: sbt '^ testOnly'
@@ -45,6 +48,3 @@ jobs:
         distribution: 'temurin'
         java-version: '11'
         cache: 'sbt'
-        
-    - name: Publish locally
-      run: sbt '^ publishLocal'
