@@ -4,7 +4,7 @@ name := "sbt-scaladoc-compiler"
 
 organization := "cchantep"
 
-version := "0.3"
+version := "0.4"
 
 crossSbtVersions := Vector("0.13.11", "1.3.1")
 

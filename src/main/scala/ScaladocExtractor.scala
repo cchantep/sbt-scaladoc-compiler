@@ -35,65 +35,92 @@ object ScaladocExtractorPlugin extends AutoPlugin {
       val log = streams.value.log
       val mdir = (sourceManaged in Test).value
       val stok = (autoImport.scaladocExtractorSkipToken).value
+      val cacheDir = streams.value.cacheDirectory
 
       if (!autoScalaLibrary.value) {
         log.warn(s"Skip Scaladoc extraction on non-Scala project: ${thisProject.value.id}")
         Seq.empty
       } else {
-        val src = (sourceDirectories in Compile).value.view.flatMap { d =>
+        val srcFiles = (sourceDirectories in Compile).value.view.flatMap { d =>
           if (!d.exists || !d.isDirectory) {
-            List.empty[(Path, File)]
+            List.empty[File]
           } else {
-            val dp = d.toPath
-
-            FileUtils.listFiles(d, Array("scala"), true).
-              asScala.toSeq.map { f =>
-              dp.relativize(f.toPath) -> f
-            }
+            FileUtils.listFiles(d, Array("scala"), true).asScala.toSeq
           }
+        }.toSeq
+
+        // Track token changes to invalidate cache when configuration changes
+        val tokenFile = cacheDir / "scaladoc-extractor" / "tokens"
+        val currentTokens = stok
+        val tokensChanged = !tokenFile.exists() ||
+          IO.read(tokenFile) != currentTokens
+
+        if (tokensChanged) {
+          log.info("Configuration changed, regenerating all files...")
+          // Clean the cache FIRST to force regeneration
+          IO.delete(cacheDir / "scaladoc-extractor")
+          // THEN write the tokens file (after directory is recreated by IO.write)
+          IO.write(tokenFile, currentTokens)
         }
 
-        val mngedPath = mdir.toPath
+        // Use Tracked.diffInputs for true per-file incremental compilation
+        val srcSet = srcFiles.toSet
+        
+        Tracked.diffInputs(
+          cacheDir / "scaladoc-extractor" / "inputs",
+          FilesInfo.lastModified
+        )(srcSet) { changeReport =>
+          // Determine which files actually changed
+          val changedFiles = changeReport.modified ++ changeReport.added
 
-        src.flatMap {
-          case (pth, f) =>
+          if (changedFiles.nonEmpty) {
+            log.info(s"Extracting snippets from ${changedFiles.size} changed source file(s)")
 
-            val content = scala.io.Source.fromFile(f).getLines
-
-            if (!content.hasNext) {
-              List.empty
-            } else {
-              log.debug(s"Extracting Scaladoc examples from $f ...")
-
-              val outPath: Path = {
-                val parent = pth.getParent
-
-                if (parent == null) mngedPath
-                else mngedPath.resolve(parent)
+            changedFiles.toSeq.flatMap { f =>
+              // Find the source directory this file belongs to
+              val sourceDir = (sourceDirectories in Compile).value.find { sd =>
+                f.toPath.normalize().startsWith(sd.toPath.normalize())
               }
-              val outDir = outPath.toFile
+              
+              sourceDir match {
+                case Some(sd) =>
+                  val pth = sd.toPath.normalize().relativize(f.toPath.normalize())
+                  val content = scala.io.Source.fromFile(f).getLines
 
-              if (!outDir.exists) {
-                outDir.mkdirs()
+                  if (!content.hasNext) {
+                    List.empty
+                  } else {
+                    log.debug(s"Extracting Scaladoc examples from $f ...")
+
+                    val mngedPath = mdir.toPath
+                    val outPath: Path = {
+                      val parent = pth.getParent
+
+                      if (parent == null) mngedPath
+                      else mngedPath.resolve(parent)
+                    }
+                    val outDir = outPath.toFile
+
+                    if (!outDir.exists) {
+                      outDir.mkdirs()
+                    }
+
+                    parse(
+                      stok, log, outDir, pth, 1L, content.next, content, List.empty)
+                  }
+                  
+                case None =>
+                  log.warn(s"Skipping $f - not in any source directory")
+                  List.empty
               }
-
-              parse(
-                stok, log, outDir, pth, 1L, content.next, content, List.empty)
             }
+          } else {
+            // Return existing generated files
+            (mdir ** "*.scala").get
+          }
         }
       }
     }).taskValue)
-
-  /*
-  val filter = { (ms: Seq[(File, String)]) =>
-    ms filter {
-      case (file, path) =>
-        path != "logback.xml" && !path.startsWith("toignore") &&
-        !path.startsWith("samples")
-    }
-  }
-
-   */
 
   // ---
 
