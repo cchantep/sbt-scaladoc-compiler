@@ -76,7 +76,7 @@ lazy val root = Project(id = "...", base = file(".")).
 
 **What gets extracted:**
 - Code blocks between `{{{` and `}}}` in Scaladoc comments (`/**` ... `*/`)
-- From all `*.scala` files in `sourceDirectories in Compile`
+- From `*.scala` files in `sourceDirectories in Compile` (configurable via `scaladocExtractorIncludes`/`scaladocExtractorExcludes`)
 - Generated as test sources in `target/scala-<version>/test-src-managed/`
 
 **Requirements for code samples:**
@@ -107,6 +107,29 @@ def foo(s: String): Int = s.size
 
 ```scala
 scaladocExtractorSkipToken := "// skip-example"
+```
+
+**Filtering files to process:**
+
+By default, all `*.scala` files are processed. You can customize which files are included or excluded:
+
+```scala
+// Only process files matching a pattern
+scaladocExtractorIncludes := "*.scala"
+
+// Exclude specific files or patterns
+scaladocExtractorExcludes := new SimpleFileFilter(_.getName.startsWith("Generated"))
+
+// Example: Only process files in specific directories
+scaladocExtractorIncludes := new SimpleFileFilter { file =>
+  val path = file.getPath
+  path.contains("/api/") || path.contains("/models/")
+}
+
+// Example: Exclude test utilities and generated code
+scaladocExtractorExcludes := new SimpleFileFilter { file =>
+  file.getName.endsWith("Spec.scala") || file.getName.contains("Generated")
+}
 ```
 
 ## Troubleshooting
