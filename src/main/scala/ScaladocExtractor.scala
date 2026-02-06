@@ -13,6 +13,7 @@ import sbt.plugins.JvmPlugin
 object ScaladocExtractorPlugin extends AutoPlugin {
   import scala.collection.JavaConverters._
   import org.apache.commons.io.FileUtils
+  import org.apache.commons.io.filefilter.IOFileFilter
 
   override def trigger = allRequirements
   override def requires = JvmPlugin
@@ -20,6 +21,12 @@ object ScaladocExtractorPlugin extends AutoPlugin {
   object autoImport {
     val scaladocExtractorSkipToken = SettingKey[String]("scaladocExtractorSkipToken",
       """Token within '{{{' and '}}}' indicating the current code example must be skipped; default: "// not compilable"""")
+
+    val scaladocExtractorIncludes = SettingKey[FileFilter]("scaladocExtractorIncludes",
+      """File filter for files to be processed; default: *.scala""")
+
+    val scaladocExtractorExcludes = SettingKey[FileFilter]("scaladocExtractorExcludes",
+      """File filter for files to be excluded; default: <none>""")
   }
 
   override def projectSettings = Seq(
@@ -31,10 +38,14 @@ object ScaladocExtractorPlugin extends AutoPlugin {
       }
     },
     autoImport.scaladocExtractorSkipToken := "// not compilable",
+    autoImport.scaladocExtractorIncludes := "*.scala",
+    autoImport.scaladocExtractorExcludes := NothingFilter,
     sourceGenerators in Test += (Def.task {
       val log = streams.value.log
       val mdir = (sourceManaged in Test).value
       val stok = (autoImport.scaladocExtractorSkipToken).value
+      val includes = (autoImport.scaladocExtractorIncludes).value
+      val excludes = (autoImport.scaladocExtractorExcludes).value
       val cacheDir = streams.value.cacheDirectory
 
       if (!autoScalaLibrary.value) {
@@ -45,9 +56,9 @@ object ScaladocExtractorPlugin extends AutoPlugin {
           if (!d.exists || !d.isDirectory) {
             List.empty[File]
           } else {
-            FileUtils.listFiles(d, Array("scala"), true).asScala.toSeq
+            listFiles(d, includes, excludes)
           }
-        }.toSeq
+        }.toSet
 
         // Track token changes to invalidate cache when configuration changes
         val tokenFile = cacheDir / "scaladoc-extractor" / "tokens"
@@ -57,19 +68,19 @@ object ScaladocExtractorPlugin extends AutoPlugin {
 
         if (tokensChanged) {
           log.info("Configuration changed, regenerating all files...")
+
           // Clean the cache FIRST to force regeneration
           IO.delete(cacheDir / "scaladoc-extractor")
+
           // THEN write the tokens file (after directory is recreated by IO.write)
           IO.write(tokenFile, currentTokens)
         }
 
         // Use Tracked.diffInputs for true per-file incremental compilation
-        val srcSet = srcFiles.toSet
-        
         Tracked.diffInputs(
           cacheDir / "scaladoc-extractor" / "inputs",
           FilesInfo.lastModified
-        )(srcSet) { changeReport =>
+        )(srcFiles) { changeReport =>
           // Determine which files actually changed
           val changedFiles = changeReport.modified ++ changeReport.added
 
@@ -90,7 +101,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
                   if (!content.hasNext) {
                     List.empty
                   } else {
-                    log.debug(s"Extracting Scaladoc examples from $f ...")
+                    log.info(s"Extracting Scaladoc examples from $f ...")
 
                     val mngedPath = mdir.toPath
                     val outPath: Path = {
@@ -123,6 +134,25 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     }).taskValue)
 
   // ---
+
+  private[cchantep] def listFiles(
+    dir: File,
+    includeFilter: FileFilter,
+    excludeFilter: FileFilter
+  ): Seq[File] = {
+    val excludes = excludeFilter.accept(_)
+    val iofilter = new IOFileFilter {
+      def accept(f: File) = includeFilter.accept(f)
+      def accept(d: File, n: String) = !excludes(d) && accept(d / n)
+    }
+    val dirfilter = new IOFileFilter {
+      def accept(f: File) = !excludes(f)
+      def accept(d: File, n: String) = accept(d / n)
+    }
+
+    FileUtils.listFiles(dir, iofilter, dirfilter).
+      asScala.filterNot(excludes).toSeq
+  }
 
   private val tripleQuote = "\"\"\""
 
