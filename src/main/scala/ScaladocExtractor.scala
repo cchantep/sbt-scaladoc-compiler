@@ -1,6 +1,6 @@
 package cchantep
 
-import java.io.{ FileOutputStream, PrintWriter }
+import java.io.{ File => JFile, FileOutputStream, PrintWriter }
 import java.nio.file.Path
 
 import scala.util.control.NonFatal
@@ -116,8 +116,27 @@ object ScaladocExtractorPlugin extends AutoPlugin {
                       outDir.mkdirs()
                     }
 
-                    parse(
-                      stok, log, outDir, pth, 1L, content.next, content, List.empty)
+                    val debug: String => Unit = msg => log.debug(msg)
+                    val nameToWriter: String => (String => Unit) = filename => {
+                      val file = outDir / filename
+                      val pw = new PrintWriter(new FileOutputStream(file))
+
+                      (str: String) => pw.println(str)
+                    }
+                    val outputName = pth.getFileName.toString.dropRight(6)
+                    val sourcePath = pth.toString
+
+                    parse[JFile](
+                      stok,
+                      debug,
+                      nameToWriter,
+                      outputName,
+                      sourcePath,
+                      1L,
+                      content.next,
+                      content,
+                      (n, acc) => (new JFile(n)) :: acc,
+                      List.empty[JFile])
                   }
                   
                 case None =>
@@ -156,181 +175,203 @@ object ScaladocExtractorPlugin extends AutoPlugin {
 
   private val tripleQuote = "\"\"\""
 
+  /**
+   * Recursively parses a Scala source file to extract Scaladoc code snippets and generate corresponding files.
+   *
+   * @param skipTok the token indicating code examples to skip
+   * @param log the logger for reporting progress and issues
+   * @param dir the output directory for generated files
+   * @param source the relative path of the source file
+   * @param line the current line number in the source
+   * @param head the current line content
+   * @param tail the iterator over remaining lines
+   * @param generated the list of files generated so far
+   * @return the list of all generated files
+   */
   @annotation.tailrec
-  private def parse(
+  private[cchantep] def parse[T](
     skipTok: String,
-    log: Logger,
-    dir: File,
-    source: Path,
+    debug: String => Unit,
+    nameToWriter: String => (String => Unit),
+    outputName: String,
+    sourcePath: String,
     line: Long,
     head: String,
     tail: Iterator[String],
-    generated: List[File]): List[File] = {
+    acc: (String, List[T]) => List[T],
+    generated: List[T]
+  ): List[T] = {
     val q1 = head.indexOf(tripleQuote)
     val q2 = head.indexOf("\"")
     val si = head.indexOf("/**")
 
     if (q1 >= 0 && (si < 0 || q1 < si)) {
       parseString(
-        skipTok, log, dir, source, line,
-        tripleQuote, head.drop(q1 + tripleQuote.size), tail, generated)
+        skipTok, line,
+        tripleQuote, head.drop(q1 + tripleQuote.size), tail) match {
+          case Some((ln, hd, tl)) =>
+            parse(skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, generated)
+          case None =>
+            generated
+        }
 
     } else if (q2 >= 0 && (si < 0 || q2 < si)) {
       parseString(
-        skipTok, log, dir, source, line,
-        "\"", head.drop(q2 + 1), tail, generated)
+        skipTok, line,
+        "\"", head.drop(q2 + 1), tail) match {
+          case Some((ln, hd, tl)) =>
+            parse(skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, generated)
+          case None =>
+            generated
+        }
 
     } else if (si >= 0) {
       parseScaladoc(
-        skipTok, log, dir, source, line, head.drop(si + 3), tail, generated)
+        skipTok, debug, nameToWriter, outputName, sourcePath, line, head.drop(si + 3), tail, acc, generated)
 
     } else if (tail.hasNext) {
-      parse(skipTok, log, dir, source, line + 1L, tail.next, tail, generated)
+      parse(skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next, tail, acc, generated)
     } else {
       generated
     }
   }
 
-  private def parseString(
+  /**
+   * Parses a string segment in a Scala source file, searching for a delimiter and advancing the iterator.
+   *
+   * @param skipTok token indicating code examples to skip
+   * @param line current line number in the source
+   * @param delimiter string delimiter to search for
+   * @param head current line content
+   * @param tail iterator over remaining lines
+   * @tparam T type of generated item
+   * @return updated list of generated items
+   */
+  private[cchantep] def parseString[T](
     skipTok: String,
-    log: Logger,
-    dir: File,
-    source: Path,
     line: Long,
     delimiter: String,
     head: String,
-    tail: Iterator[String],
-    generated: List[File]): List[File] = {
+    tail: Iterator[String]
+  ): Option[(Long, String, Iterator[String])] = {
     val i = head.indexOf(delimiter)
 
     if (i >= 0) {
-      parse(
-        skipTok, log, dir, source, line,
-        head.drop(i + delimiter.size), tail, generated)
-
+      Some((line, head.drop(i + delimiter.size), tail))
     } else if (tail.hasNext) {
-      parse(skipTok, log, dir, source, line + 1L, tail.next, tail, generated)
+      Some((line + 1L, tail.next, tail))
     } else {
-      generated
+      None
     }
   }
 
   @annotation.tailrec
-  private def parseScaladoc(
+  private def parseScaladoc[T](
     skipTok: String,
-    log: Logger,
-    dir: File,
-    source: Path,
+    debug: String => Unit,
+    nameToWriter: String => (String => Unit),
+    outputName: String,
+    sourcePath: String,
     line: Long,
     head: String,
     tail: Iterator[String],
-    generated: List[File]): List[File] = {
+    acc: (/* snippetFileName */ String, List[T]) => List[T],
+    generated: List[T]): List[T] = {
 
     val e = head.indexOf("*/")
     val s = head.indexOf("{{{")
 
     if (e >= 0 && (s < 0 || e < s)) {
-      parse(skipTok, log, dir, source, line, head.drop(e + 2), tail, generated)
+      parse[T](skipTok, debug, nameToWriter, outputName, sourcePath, line, head.drop(e + 2), tail, acc, generated)
     } else if (s > 0) {
-      val name = source.getFileName.toString.dropRight(6)
-      val f = dir / s"scaladoc-${name}-${line}.scala"
-
-      log.debug(s"Snippet found at line $line (${source}.scala)")
-
-      val p = new PrintWriter(new FileOutputStream(f))
-
-      try {
-        p.println("package scaladocextractor\r\n")
-        p.println(s"/* ${source}, ln $line */")
-        p.println(s"object ${name}${line}Snippet {")
-        p.flush()
-
-        parseSnippet(
-          skipTok, log, dir, source, line,
-          f, p, head.drop(s + 3), tail, generated)
-
-      } catch {
-        case NonFatal(cause) =>
-          log.error(s"""Fails to parse snippet: ${source}, ln $line: ${cause.getMessage}""")
-
-          throw cause
-      } finally {
-        try {
-          p.close()
-        } catch {
-          case NonFatal(cause) =>
+      val snippetFileName = s"scaladoc-${outputName}-${line}.scala"
+      
+      debug(s"Snippet found at line $line (${sourcePath}.scala)")
+      
+      val writer = nameToWriter(snippetFileName)
+      
+      writer("package scaladocextractor\r\n")
+      writer(s"/* ${sourcePath}, ln $line */")
+      writer(s"object ${outputName}${line}Snippet {")
+      
+      parseSnippet(
+        skipTok, debug, outputName, sourcePath, line,
+        writer, head.drop(s + 3), tail) match {
+          case Some((ln, hd, tl)) =>
+            parseScaladoc[T](skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, generated)
+          case None =>
+            acc(snippetFileName, generated)
         }
-      }
+      
+      //acc(snippetFileName, updated)
     } else if (!tail.hasNext) {
       generated
     } else {
       parseScaladoc(
-        skipTok, log, dir, source, line + 1L, tail.next, tail, generated)
+        skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next, tail, acc, generated)
     }
   }
-
+  
+  /**
+   * Recursively parses a Scaladoc code snippet, writing its contents and handling skip tokens, snippet boundaries, and premature ends.
+   *
+   * @param skipTok Token indicating the snippet should be skipped (e.g., "// not compilable").
+   * @param debug Function to log debug messages.
+   * @param outputName Name of the output snippet (used for debug/logging).
+   * @param sourcePath Relative path of the source file.
+   * @param line Current line number in the source file.
+   * @param writer Function to write snippet lines to the output.
+   * @param head Current line content to parse.
+   * @param tail Iterator over remaining lines in the source file.
+   * @tparam T Type parameter (not used directly, for compatibility with recursive parsing).
+   * @return Option containing (next line number, next head, next tail) if parsing continues, or None if snippet parsing ends.
+   */
   @annotation.tailrec
-  private def parseSnippet(
+  private[cchantep] def parseSnippet[T](
     skipTok: String,
-    log: Logger,
-    dir: File,
-    source: Path,
+    debug: String => Unit,
+    outputName: String,
+    sourcePath: String,
     line: Long,
-    f: File,
-    out: PrintWriter,
+    writer: String => Unit,
     head: String,
-    tail: Iterator[String],
-    generated: List[File]): List[File] = {
+    tail: Iterator[String]
+  ): Option[(Long, String, Iterator[String])] = {
     val s = head.indexOf(skipTok)
     val e = head.indexOf("}}}")
     val i = head.indexOf("*/")
 
     if (s >= 0 && (e < 0 || s < e) && (i < 0 || s < i)) {
-      log.info(s"Skip Scaladoc snippet at line $line ($source): ${cleanSnippet(head)}")
+      debug(s"Skip Scaladoc snippet at line $line ($sourcePath): ${cleanSnippet(head)}")
 
-      parseScaladoc(
-        skipTok, log, dir, source, line, head.drop(s + skipTok.size), tail,
-        generated /* do not register the skipped snippet */ )
-
+      Some((line, head.drop(s + skipTok.size), tail))
     } else if (i >= 0 && (e < 0 || i < e)) {
-      val msg = s"Premature end of Scaladoc snippet at line $line (${source})"
-
-      log.warn(msg)
-      out.println(s"// $msg")
-
-      parseScaladoc(
-        skipTok, log, dir, source, line, head.drop(i + 2), tail,
-        generated /* do not register the generated snippet in this case */ )
-
+      val msg = s"Premature end of Scaladoc snippet at line $line (${sourcePath})"
+      
+      debug(msg)
+      
+      writer(s"// $msg")
+      
+      Some((line, head.drop(i + 2), tail))
     } else if (e >= 0) {
       val (code, rem) = head.splitAt(e)
-
-      out.println(cleanSnippet(code))
-      out.println("}" /* enclosing snippet object */ )
-
-      out.flush()
-      out.close()
-
-      log.debug(s"Generating $f")
-
-      parseScaladoc(
-        skipTok, log, dir, source, line, rem.drop(3), tail, f :: generated)
-
+      val normalized = cleanSnippet(code)
+      if (normalized.trim.nonEmpty) writer(s"  $normalized") else writer(normalized)
+      writer("}" /* enclosing snippet object */ )
+      debug(s"Generating ${outputName}")
+      Some((line, rem.drop(3), tail))
     } else {
-      out.println(cleanSnippet(head))
-
+      val normalized = cleanSnippet(head)
+      if (normalized.trim.nonEmpty) writer(s"  $normalized") else writer(normalized)
       if (tail.hasNext) {
-        parseSnippet(
-          skipTok, log, dir, source, line + 1L,
-          f, out, tail.next, tail, generated)
-
+        parseSnippet[T](
+          skipTok, debug, outputName, sourcePath, line + 1L,
+          writer, tail.next, tail)
       } else {
-        generated
+        None
       }
     }
   }
 
-  private def cleanSnippet(in: String): String =
-    in.dropWhile(_.isSpaceChar).stripPrefix("*")//. // strip prefix '^[ ]*\*'
-      //replaceAll("""\\""", "") // unescape
+  private[cchantep] def cleanSnippet(in: String): String ="^[ \\t]*\\*[ ]?".r.replaceFirstIn(in, "")
 }
