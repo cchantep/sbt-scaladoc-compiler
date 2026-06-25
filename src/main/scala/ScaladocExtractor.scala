@@ -1,6 +1,6 @@
 package cchantep
 
-import java.io.{ File => JFile, FileOutputStream, PrintWriter }
+import java.io.{ File => JFile }
 import java.nio.file.Path
 
 import scala.util.control.NonFatal
@@ -30,7 +30,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
   }
 
   override def projectSettings = Seq(
-    scalacOptions in (Test, doc) ++= {
+    Test / doc / scalacOptions ++= {
       if (scalaBinaryVersion.value == "3") {
         List("-skip-by-id:scaladocextractor")
       } else {
@@ -40,9 +40,9 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     autoImport.scaladocExtractorSkipToken := "// not compilable",
     autoImport.scaladocExtractorIncludes := "*.scala",
     autoImport.scaladocExtractorExcludes := NothingFilter,
-    sourceGenerators in Test += (Def.task {
+    Test / sourceGenerators += (Def.task {
       val log = streams.value.log
-      val mdir = (sourceManaged in Test).value
+      val mdir = (Test / sourceManaged).value
       val stok = (autoImport.scaladocExtractorSkipToken).value
       val includes = (autoImport.scaladocExtractorIncludes).value
       val excludes = (autoImport.scaladocExtractorExcludes).value
@@ -52,7 +52,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
         log.warn(s"Skip Scaladoc extraction on non-Scala project: ${thisProject.value.id}")
         Seq.empty
       } else {
-        val srcFiles = (sourceDirectories in Compile).value.view.flatMap { d =>
+        val srcFiles = (Compile / sourceDirectories).value.view.flatMap { d =>
           if (!d.exists || !d.isDirectory) {
             List.empty[File]
           } else {
@@ -82,21 +82,66 @@ object ScaladocExtractorPlugin extends AutoPlugin {
           FilesInfo.lastModified
         )(srcFiles) { changeReport =>
           // Determine which files actually changed
-          val changedFiles = changeReport.modified ++ changeReport.added
+          val existingManaged = (mdir ** "*.scala").get()
+          val changedFiles = {
+            val changed = changeReport.modified ++ changeReport.added
+
+            if (changed.nonEmpty || managedSourcesAvailable(existingManaged)) {
+              changed
+            } else {
+              log.info("Managed Scaladoc snippets missing, regenerating all source file(s)")
+              srcFiles
+            }
+          }
+
+          val removedFiles = changeReport.removed
+
+          // Clean up generated files from removed source inputs
+          val removedManagedFiles = if (removedFiles.nonEmpty) {
+            log.info(s"Cleaning up generated files for ${removedFiles.size} removed source file(s)")
+
+            removedFiles.toSeq.flatMap { removedFile =>
+              val sourceDir = (Compile / sourceDirectories).value.find { sd =>
+                removedFile.toPath.normalize().startsWith(sd.toPath.normalize())
+              }
+
+              sourceDir.toSeq.flatMap { sd =>
+                val relativePath = sd.toPath.normalize().relativize(removedFile.toPath.normalize())
+                val outputName = relativePath.getFileName.toString.dropRight(6)
+                val managedPath = {
+                  val parent = relativePath.getParent
+
+                  if (parent == null) mdir
+                  else mdir.toPath.resolve(parent).toFile
+                }
+                val stalePattern = (managedPath ** s"scaladoc-${outputName}-*.scala").get()
+
+                stalePattern.foreach { f =>
+                  log.debug(s"Deleting stale generated file: ${f.getName}")
+
+                  IO.delete(f)
+                }
+
+                stalePattern
+              }
+            }
+          } else {
+            Seq.empty[File]
+          }
 
           if (changedFiles.nonEmpty) {
             log.info(s"Extracting snippets from ${changedFiles.size} changed source file(s)")
 
             changedFiles.toSeq.flatMap { f =>
               // Find the source directory this file belongs to
-              val sourceDir = (sourceDirectories in Compile).value.find { sd =>
+              val sourceDir = (Compile / sourceDirectories).value.find { sd =>
                 f.toPath.normalize().startsWith(sd.toPath.normalize())
               }
               
               sourceDir match {
                 case Some(sd) =>
                   val pth = sd.toPath.normalize().relativize(f.toPath.normalize())
-                  val content = scala.io.Source.fromFile(f).getLines
+                  val content = scala.io.Source.fromFile(f).getLines()
 
                   if (!content.hasNext) {
                     List.empty
@@ -118,10 +163,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
 
                     val debug: String => Unit = msg => log.debug(msg)
                     val nameToWriter: String => (String => Unit) = filename => {
-                      val file = outDir / filename
-                      val pw = new PrintWriter(new FileOutputStream(file))
-
-                      (str: String) => pw.println(str)
+                      fileLineWriter(outDir / filename)
                     }
                     val outputName = pth.getFileName.toString.dropRight(6)
                     val sourcePath = pth.toString
@@ -133,9 +175,9 @@ object ScaladocExtractorPlugin extends AutoPlugin {
                       outputName,
                       sourcePath,
                       1L,
-                      content.next,
+                      content.next(),
                       content,
-                      (n, acc) => (new JFile(n)) :: acc,
+                      (n, acc) => (new JFile(outDir, n)) :: acc,
                       List.empty[JFile])
                   }
                   
@@ -146,7 +188,8 @@ object ScaladocExtractorPlugin extends AutoPlugin {
             }
           } else {
             // Return existing generated files
-            (mdir ** "*.scala").get
+            if (removedManagedFiles.isEmpty) existingManaged
+            else (mdir ** "*.scala").get()
           }
         }
       }
@@ -171,6 +214,15 @@ object ScaladocExtractorPlugin extends AutoPlugin {
 
     FileUtils.listFiles(dir, iofilter, dirfilter).
       asScala.filterNot(excludes).toSeq
+  }
+
+  private[cchantep] def managedSourcesAvailable(files: Seq[File]): Boolean =
+    files.exists(f => f.isFile && f.length > 0L)
+
+  private[cchantep] def fileLineWriter(file: File): String => Unit = {
+    IO.write(file, "")
+
+    (str: String) => IO.append(file, s"$str${System.lineSeparator}")
   }
 
   private val tripleQuote = "\"\"\""
@@ -230,7 +282,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
         skipTok, debug, nameToWriter, outputName, sourcePath, line, head.drop(si + 3), tail, acc, generated)
 
     } else if (tail.hasNext) {
-      parse(skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next, tail, acc, generated)
+      parse(skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next(), tail, acc, generated)
     } else {
       generated
     }
@@ -259,7 +311,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     if (i >= 0) {
       Some((line, head.drop(i + delimiter.size), tail))
     } else if (tail.hasNext) {
-      Some((line + 1L, tail.next, tail))
+      Some((line + 1L, tail.next(), tail))
     } else {
       None
     }
@@ -294,13 +346,17 @@ object ScaladocExtractorPlugin extends AutoPlugin {
       writer(s"/* ${sourcePath}, ln $line */")
       writer(s"object ${outputName}${line}Snippet {")
       
-      parseSnippet(
+      parseSnippetState(
         skipTok, debug, outputName, sourcePath, line,
         writer, head.drop(s + 3), tail) match {
-          case Some((ln, hd, tl)) =>
-            parseScaladoc[T](skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, generated)
+          case Some((ln, hd, tl, complete)) =>
+            val updated =
+              if (complete) acc(snippetFileName, generated)
+              else generated
+
+            parseScaladoc[T](skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, updated)
           case None =>
-            acc(snippetFileName, generated)
+            generated
         }
       
       //acc(snippetFileName, updated)
@@ -308,7 +364,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
       generated
     } else {
       parseScaladoc(
-        skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next, tail, acc, generated)
+        skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next(), tail, acc, generated)
     }
   }
   
@@ -326,7 +382,6 @@ object ScaladocExtractorPlugin extends AutoPlugin {
    * @tparam T Type parameter (not used directly, for compatibility with recursive parsing).
    * @return Option containing (next line number, next head, next tail) if parsing continues, or None if snippet parsing ends.
    */
-  @annotation.tailrec
   private[cchantep] def parseSnippet[T](
     skipTok: String,
     debug: String => Unit,
@@ -337,6 +392,22 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     head: String,
     tail: Iterator[String]
   ): Option[(Long, String, Iterator[String])] = {
+    parseSnippetState[T](
+      skipTok, debug, outputName, sourcePath, line, writer, head, tail).
+      map { case (ln, hd, tl, _) => (ln, hd, tl) }
+  }
+
+  @annotation.tailrec
+  private[cchantep] def parseSnippetState[T](
+    skipTok: String,
+    debug: String => Unit,
+    outputName: String,
+    sourcePath: String,
+    line: Long,
+    writer: String => Unit,
+    head: String,
+    tail: Iterator[String]
+  ): Option[(Long, String, Iterator[String], Boolean)] = {
     val s = head.indexOf(skipTok)
     val e = head.indexOf("}}}")
     val i = head.indexOf("*/")
@@ -344,7 +415,7 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     if (s >= 0 && (e < 0 || s < e) && (i < 0 || s < i)) {
       debug(s"Skip Scaladoc snippet at line $line ($sourcePath): ${cleanSnippet(head)}")
 
-      Some((line, head.drop(s + skipTok.size), tail))
+      Some((line, head.drop(s + skipTok.size), tail, false))
     } else if (i >= 0 && (e < 0 || i < e)) {
       val msg = s"Premature end of Scaladoc snippet at line $line (${sourcePath})"
       
@@ -352,21 +423,21 @@ object ScaladocExtractorPlugin extends AutoPlugin {
       
       writer(s"// $msg")
       
-      Some((line, head.drop(i + 2), tail))
+      Some((line, head.drop(i + 2), tail, false))
     } else if (e >= 0) {
       val (code, rem) = head.splitAt(e)
       val normalized = cleanSnippet(code)
       if (normalized.trim.nonEmpty) writer(s"  $normalized") else writer(normalized)
       writer("}" /* enclosing snippet object */ )
       debug(s"Generating ${outputName}")
-      Some((line, rem.drop(3), tail))
+      Some((line, rem.drop(3), tail, true))
     } else {
       val normalized = cleanSnippet(head)
       if (normalized.trim.nonEmpty) writer(s"  $normalized") else writer(normalized)
       if (tail.hasNext) {
-        parseSnippet[T](
+        parseSnippetState[T](
           skipTok, debug, outputName, sourcePath, line + 1L,
-          writer, tail.next, tail)
+          writer, tail.next(), tail)
       } else {
         None
       }

@@ -306,7 +306,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         outputName,
         sourcePath,
         1L,
-        lines.next,
+        lines.next(),
         lines,
         acc,
         generated
@@ -340,7 +340,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         "DummyOutput",
         "Dummy.scala",
         1L,
-        dummySource.next,
+        dummySource.next(),
         dummySource,
         (n, acc) => n :: acc,
         Nil

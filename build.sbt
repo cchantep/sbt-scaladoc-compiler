@@ -4,29 +4,24 @@ name := "sbt-scaladoc-compiler"
 
 organization := "cchantep"
 
-version := "0.6"
+version := "0.8"
 
-crossSbtVersions := Vector("0.13.11", "1.3.1")
+crossSbtVersions := Vector("1.12.3", "2.0.0")
 
-libraryDependencies ++= {
-  val sv = scalaBinaryVersion.value
+scalaVersion := {
+  val v = (pluginCrossBuild / sbtVersion).value
 
-  val specsVer = sv match {
-    case "2.10" =>
-      "3.10.0"
-
-    case "2.11" =>
-      "4.10.6"
-
-    case _ =>
-      "4.21.0"
+  if (v startsWith "2.") {
+    "3.3.8"
+  } else {
+    "2.12.20"
   }
-
-  Seq(
-    "commons-io" % "commons-io" % "2.6",
-    "org.specs2" %% "specs2-core" % specsVer % Test
-  )
 }
+
+libraryDependencies ++= Seq(
+  "commons-io" % "commons-io" % "2.6",
+  "org.specs2" %% "specs2-core" % "4.21.0" % Test
+)
 
 ThisBuild / publishTo := sys.env.get("REPO_PATH").map { path =>
   import Resolver.ivyStylePatterns

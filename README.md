@@ -46,6 +46,7 @@ Using this SBT plugin, the code samples between `{{{` and `}}}` (in Scaladoc sta
 ## Get started
 
 **Requirements:**
+
 - SBT 0.13+ or 1.0+
 - Scala 2.10+ or 3.x
 
@@ -75,6 +76,7 @@ lazy val root = Project(id = "...", base = file(".")).
 ## Extraction behaviour
 
 **What gets extracted:**
+
 - Code blocks between `{{{` and `}}}` in Scaladoc comments (`/**` ... `*/`)
 - From `*.scala` files in `sourceDirectories in Compile` (configurable via `scaladocExtractorIncludes`/`scaladocExtractorExcludes`)
 - Generated as test sources in `target/scala-<version>/test-src-managed/`
