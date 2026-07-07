@@ -12,8 +12,8 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val delimiter = ","
       val head = "abc"
       val tail = Iterator.empty
-      val result = ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail)
-      result must beNone
+
+      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beNone
     }
 
     "return Some with dropped head if delimiter is found" in {
@@ -22,8 +22,8 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val delimiter = ","
       val head = "abc,def"
       val tail = Iterator.empty
-      val result = ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail)
-      result must beSome((1L, "def", tail))
+
+      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beSome((1L, "def", tail))
     }
 
     "return Some with next tail element if delimiter not found but tail hasNext" in {
@@ -32,8 +32,8 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val delimiter = ","
       val head = "abc"
       val tail = Iterator("def")
-      val result = ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail)
-      result must beSome((2L, "def", tail))
+
+      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beSome((2L, "def", tail))
     }
 
     "handle delimiter at start of string" in {
@@ -42,8 +42,8 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val delimiter = ","
       val head = ",abc"
       val tail = Iterator.empty
-      val result = ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail)
-      result must beSome((1L, "abc", tail))
+
+      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beSome((1L, "abc", tail))
     }
 
     "handle multiple delimiters in string" in {
@@ -59,31 +59,19 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
   
   "cleanSnippet" should {
     "remove leading spaces and star" in {
-      val input = "   * some code"
-      val result = ScaladocExtractorPlugin.cleanSnippet(input)
-
-      result must_=== "some code"
+      ScaladocExtractorPlugin.cleanSnippet("   * some code") must_=== "some code"
     }
 
     "remove only leading star if no spaces" in {
-      val input = "*some code"
-      val result = ScaladocExtractorPlugin.cleanSnippet(input)
-
-      result must_=== "some code"
+      ScaladocExtractorPlugin.cleanSnippet("*some code") must_=== "some code"
     }
 
     "not remove star in middle of string" in {
-      val input = "  some * code"
-      val result = ScaladocExtractorPlugin.cleanSnippet(input)
-
-      result must_=== "  some * code"
+      ScaladocExtractorPlugin.cleanSnippet("  some * code") must_=== "  some * code"
     }
 
     "handle empty string" in {
-      val input = ""
-      val result = ScaladocExtractorPlugin.cleanSnippet(input)
-
-      result must_=== ""
+      ScaladocExtractorPlugin.cleanSnippet("") must_=== ""
     }
   }
 
@@ -226,6 +214,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         skipTok,
         msg => debugMsgs.append(msg),
         nameToWriter,
+        _ => (),
         outputName,
         sourcePath,
         1L,
@@ -252,6 +241,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         skipTok,
         msg => debugMsgs.append(msg),
         nameToWriter,
+        _ => (),
         outputName,
         sourcePath,
         1L,
@@ -278,6 +268,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         skipTok,
         msg => debugMsgs.append(msg),
         nameToWriter,
+        _ => (),
         outputName,
         sourcePath,
         1L,
@@ -303,6 +294,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         skipTok,
         msg => debugMsgs.append(msg),
         nameToWriter,
+        _ => (),
         outputName,
         sourcePath,
         1L,
@@ -333,10 +325,12 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         "object Dummy { def foo = 42 }"
       )
       val nameToWriter: String => (String => Unit) = _ => (s => generated.append(s))
+
       cchantep.ScaladocExtractorPlugin.parse[String](
         skipTok,
         msg => debugMsgs.append(msg),
         nameToWriter,
+        _ => (),
         "DummyOutput",
         "Dummy.scala",
         1L,
