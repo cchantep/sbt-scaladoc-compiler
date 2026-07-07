@@ -4,15 +4,15 @@ name := "sbt-scaladoc-compiler"
 
 organization := "cchantep"
 
-version := "0.8"
+version := "0.9"
 
-crossSbtVersions := Vector("1.12.3", "2.0.0")
+crossSbtVersions := Vector("1.12.3", "2.0.1")
 
 scalaVersion := {
   val v = (pluginCrossBuild / sbtVersion).value
 
-  if (v startsWith "2.") {
-    "3.3.8"
+  if (v.startsWith("2.")) {
+    "3.8.4"
   } else {
     "2.12.20"
   }

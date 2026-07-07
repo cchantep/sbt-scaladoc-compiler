@@ -19,15 +19,25 @@ object ScaladocExtractorPlugin extends AutoPlugin {
   override def requires = JvmPlugin
 
   object autoImport {
-    val scaladocExtractorSkipToken = SettingKey[String]("scaladocExtractorSkipToken",
-      """Token within '{{{' and '}}}' indicating the current code example must be skipped; default: "// not compilable"""")
 
-    val scaladocExtractorIncludes = SettingKey[FileFilter]("scaladocExtractorIncludes",
-      """File filter for files to be processed; default: *.scala""")
+    val scaladocExtractorSkipToken = SettingKey[String](
+      "scaladocExtractorSkipToken",
+      """Token within '{{{' and '}}}' indicating the current code example must be skipped; default: "// not compilable""""
+    )
 
-    val scaladocExtractorExcludes = SettingKey[FileFilter]("scaladocExtractorExcludes",
-      """File filter for files to be excluded; default: <none>""")
+    val scaladocExtractorIncludes = SettingKey[FileFilter](
+      "scaladocExtractorIncludes",
+      """File filter for files to be processed; default: *.scala"""
+    )
+
+    val scaladocExtractorExcludes = SettingKey[FileFilter](
+      "scaladocExtractorExcludes",
+      """File filter for files to be excluded; default: <none>"""
+    )
   }
+
+  private val cleanScaladocExtractorCache =
+    taskKey[Unit]("Clean Scaladoc extractor cache")
 
   override def projectSettings = Seq(
     Test / doc / scalacOptions ++= {
@@ -40,6 +50,17 @@ object ScaladocExtractorPlugin extends AutoPlugin {
     autoImport.scaladocExtractorSkipToken := "// not compilable",
     autoImport.scaladocExtractorIncludes := "*.scala",
     autoImport.scaladocExtractorExcludes := NothingFilter,
+    cleanScaladocExtractorCache := {
+      val cacheDir = streams.value.cacheDirectory
+      val log = streams.value.log
+
+      val extractorCache = cacheDir / "scaladoc-extractor"
+
+      log.debug(s"Cleaning Scaladoc extractor cache: $extractorCache")
+
+      IO.delete(extractorCache)
+    },
+    Test / clean := (Test / clean).dependsOn(cleanScaladocExtractorCache).value,
     Test / sourceGenerators += (Def.task {
       val log = streams.value.log
       val mdir = (Test / sourceManaged).value
@@ -106,7 +127,9 @@ object ScaladocExtractorPlugin extends AutoPlugin {
               }
 
               sourceDir.toSeq.flatMap { sd =>
-                val relativePath = sd.toPath.normalize().relativize(removedFile.toPath.normalize())
+                val relativePath = sd.toPath
+                  .normalize()
+                  .relativize(removedFile.toPath.normalize())
                 val outputName = relativePath.getFileName.toString.dropRight(6)
                 val managedPath = {
                   val parent = relativePath.getParent
@@ -114,7 +137,8 @@ object ScaladocExtractorPlugin extends AutoPlugin {
                   if (parent == null) mdir
                   else mdir.toPath.resolve(parent).toFile
                 }
-                val stalePattern = (managedPath ** s"scaladoc-${outputName}-*.scala").get()
+                val stalePattern =
+                  (managedPath ** s"scaladoc-${outputName}-*.scala").get()
 
                 stalePattern.foreach { f =>
                   log.debug(s"Deleting stale generated file: ${f.getName}")
@@ -137,10 +161,11 @@ object ScaladocExtractorPlugin extends AutoPlugin {
               val sourceDir = (Compile / sourceDirectories).value.find { sd =>
                 f.toPath.normalize().startsWith(sd.toPath.normalize())
               }
-              
+
               sourceDir match {
                 case Some(sd) =>
-                  val pth = sd.toPath.normalize().relativize(f.toPath.normalize())
+                  val pth =
+                    sd.toPath.normalize().relativize(f.toPath.normalize())
                   val content = scala.io.Source.fromFile(f).getLines()
 
                   if (!content.hasNext) {
@@ -172,15 +197,17 @@ object ScaladocExtractorPlugin extends AutoPlugin {
                       stok,
                       debug,
                       nameToWriter,
+                      filename => (outDir / filename).delete(),
                       outputName,
                       sourcePath,
                       1L,
                       content.next(),
                       content,
                       (n, acc) => (new JFile(outDir, n)) :: acc,
-                      List.empty[JFile])
+                      List.empty[JFile]
+                    )
                   }
-                  
+
                 case None =>
                   log.warn(s"Skipping $f - not in any source directory")
                   List.empty
@@ -193,15 +220,16 @@ object ScaladocExtractorPlugin extends AutoPlugin {
           }
         }
       }
-    }).taskValue)
+    }).taskValue
+  )
 
   // ---
 
   private[cchantep] def listFiles(
-    dir: File,
-    includeFilter: FileFilter,
-    excludeFilter: FileFilter
-  ): Seq[File] = {
+      dir: File,
+      includeFilter: FileFilter,
+      excludeFilter: FileFilter
+    ): Seq[File] = {
     val excludes = excludeFilter.accept(_)
     val iofilter = new IOFileFilter {
       def accept(f: File) = includeFilter.accept(f)
@@ -212,8 +240,11 @@ object ScaladocExtractorPlugin extends AutoPlugin {
       def accept(d: File, n: String) = accept(d / n)
     }
 
-    FileUtils.listFiles(dir, iofilter, dirfilter).
-      asScala.filterNot(excludes).toSeq
+    FileUtils
+      .listFiles(dir, iofilter, dirfilter)
+      .asScala
+      .filterNot(excludes)
+      .toSeq
   }
 
   private[cchantep] def managedSourcesAvailable(files: Seq[File]): Boolean =
@@ -231,7 +262,9 @@ object ScaladocExtractorPlugin extends AutoPlugin {
    * Recursively parses a Scala source file to extract Scaladoc code snippets and generate corresponding files.
    *
    * @param skipTok the token indicating code examples to skip
-   * @param log the logger for reporting progress and issues
+   * @param debug the logger for reporting progress and issues
+   * @param nameToWriter
+   * @param cancel the function to cancel a partially generated file
    * @param dir the output directory for generated files
    * @param source the relative path of the source file
    * @param line the current line number in the source
@@ -242,47 +275,100 @@ object ScaladocExtractorPlugin extends AutoPlugin {
    */
   @annotation.tailrec
   private[cchantep] def parse[T](
-    skipTok: String,
-    debug: String => Unit,
-    nameToWriter: String => (String => Unit),
-    outputName: String,
-    sourcePath: String,
-    line: Long,
-    head: String,
-    tail: Iterator[String],
-    acc: (String, List[T]) => List[T],
-    generated: List[T]
-  ): List[T] = {
+      skipTok: String,
+      debug: String => Unit,
+      nameToWriter: String => (String => Unit),
+      cancel: String => Unit,
+      outputName: String,
+      sourcePath: String,
+      line: Long,
+      head: String,
+      tail: Iterator[String],
+      acc: (String, List[T]) => List[T],
+      generated: List[T]
+    ): List[T] = {
     val q1 = head.indexOf(tripleQuote)
     val q2 = head.indexOf("\"")
     val si = head.indexOf("/**")
 
     if (q1 >= 0 && (si < 0 || q1 < si)) {
       parseString(
-        skipTok, line,
-        tripleQuote, head.drop(q1 + tripleQuote.size), tail) match {
-          case Some((ln, hd, tl)) =>
-            parse(skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, generated)
-          case None =>
+        skipTok,
+        line,
+        tripleQuote,
+        head.drop(q1 + tripleQuote.size),
+        tail
+      ) match {
+        case Some((ln, hd, tl)) =>
+          parse(
+            skipTok,
+            debug,
+            nameToWriter,
+            cancel,
+            outputName,
+            sourcePath,
+            ln,
+            hd,
+            tl,
+            acc,
             generated
-        }
+          )
+
+        case None =>
+          generated
+      }
 
     } else if (q2 >= 0 && (si < 0 || q2 < si)) {
-      parseString(
-        skipTok, line,
-        "\"", head.drop(q2 + 1), tail) match {
-          case Some((ln, hd, tl)) =>
-            parse(skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, generated)
-          case None =>
+      parseString(skipTok, line, "\"", head.drop(q2 + 1), tail) match {
+        case Some((ln, hd, tl)) =>
+          parse(
+            skipTok,
+            debug,
+            nameToWriter,
+            cancel,
+            outputName,
+            sourcePath,
+            ln,
+            hd,
+            tl,
+            acc,
             generated
-        }
+          )
+
+        case None =>
+          generated
+      }
 
     } else if (si >= 0) {
       parseScaladoc(
-        skipTok, debug, nameToWriter, outputName, sourcePath, line, head.drop(si + 3), tail, acc, generated)
+        skipTok,
+        debug,
+        nameToWriter,
+        cancel,
+        outputName,
+        sourcePath,
+        line,
+        head.drop(si + 3),
+        tail,
+        acc,
+        generated
+      )
 
     } else if (tail.hasNext) {
-      parse(skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next(), tail, acc, generated)
+      parse(
+        skipTok,
+        debug,
+        nameToWriter,
+        cancel,
+        outputName,
+        sourcePath,
+        line + 1L,
+        tail.next(),
+        tail,
+        acc,
+        generated
+      )
+
     } else {
       generated
     }
@@ -300,12 +386,12 @@ object ScaladocExtractorPlugin extends AutoPlugin {
    * @return updated list of generated items
    */
   private[cchantep] def parseString[T](
-    skipTok: String,
-    line: Long,
-    delimiter: String,
-    head: String,
-    tail: Iterator[String]
-  ): Option[(Long, String, Iterator[String])] = {
+      skipTok: String,
+      line: Long,
+      delimiter: String,
+      head: String,
+      tail: Iterator[String]
+    ): Option[(Long, String, Iterator[String])] = {
     val i = head.indexOf(delimiter)
 
     if (i >= 0) {
@@ -319,55 +405,107 @@ object ScaladocExtractorPlugin extends AutoPlugin {
 
   @annotation.tailrec
   private def parseScaladoc[T](
-    skipTok: String,
-    debug: String => Unit,
-    nameToWriter: String => (String => Unit),
-    outputName: String,
-    sourcePath: String,
-    line: Long,
-    head: String,
-    tail: Iterator[String],
-    acc: (/* snippetFileName */ String, List[T]) => List[T],
-    generated: List[T]): List[T] = {
+      skipTok: String,
+      debug: String => Unit,
+      nameToWriter: String => (String => Unit),
+      cancel: String => Unit,
+      outputName: String,
+      sourcePath: String,
+      line: Long,
+      head: String,
+      tail: Iterator[String],
+      acc: (/* snippetFileName */ String, List[T]) => List[T],
+      generated: List[T]
+    ): List[T] = {
 
     val e = head.indexOf("*/")
     val s = head.indexOf("{{{")
 
     if (e >= 0 && (s < 0 || e < s)) {
-      parse[T](skipTok, debug, nameToWriter, outputName, sourcePath, line, head.drop(e + 2), tail, acc, generated)
+      parse[T](
+        skipTok,
+        debug,
+        nameToWriter,
+        cancel,
+        outputName,
+        sourcePath,
+        line,
+        head.drop(e + 2),
+        tail,
+        acc,
+        generated
+      )
+
     } else if (s > 0) {
       val snippetFileName = s"scaladoc-${outputName}-${line}.scala"
-      
+
       debug(s"Snippet found at line $line (${sourcePath}.scala)")
-      
+
       val writer = nameToWriter(snippetFileName)
-      
+
       writer("package scaladocextractor\r\n")
       writer(s"/* ${sourcePath}, ln $line */")
       writer(s"object ${outputName}${line}Snippet {")
-      
-      parseSnippetState(
-        skipTok, debug, outputName, sourcePath, line,
-        writer, head.drop(s + 3), tail) match {
-          case Some((ln, hd, tl, complete)) =>
-            val updated =
-              if (complete) acc(snippetFileName, generated)
-              else generated
 
-            parseScaladoc[T](skipTok, debug, nameToWriter, outputName, sourcePath, ln, hd, tl, acc, updated)
-          case None =>
-            generated
-        }
-      
-      //acc(snippetFileName, updated)
+      parseSnippetState(
+        skipTok,
+        debug,
+        outputName,
+        sourcePath,
+        line,
+        writer,
+        head.drop(s + 3),
+        tail
+      ) match {
+        case Some((ln, hd, tl, complete)) =>
+          val updated = {
+            if (complete) {
+              acc(snippetFileName, generated)
+            } else {
+              cancel(snippetFileName)
+
+              generated
+            }
+          }
+
+          parseScaladoc[T](
+            skipTok,
+            debug,
+            nameToWriter,
+            cancel,
+            outputName,
+            sourcePath,
+            ln,
+            hd,
+            tl,
+            acc,
+            updated
+          )
+
+        case None =>
+          generated
+      }
+
+      // acc(snippetFileName, updated)
     } else if (!tail.hasNext) {
       generated
     } else {
       parseScaladoc(
-        skipTok, debug, nameToWriter, outputName, sourcePath, line + 1L, tail.next(), tail, acc, generated)
+        skipTok,
+        debug,
+        nameToWriter,
+        cancel,
+        outputName,
+        sourcePath,
+        line + 1L,
+        tail.next(),
+        tail,
+        acc,
+        generated
+      )
     }
   }
-  
+
   /**
    * Recursively parses a Scaladoc code snippet, writing its contents and handling skip tokens, snippet boundaries, and premature ends.
    *
@@ -383,31 +521,38 @@ object ScaladocExtractorPlugin extends AutoPlugin {
    * @return Option containing (next line number, next head, next tail) if parsing continues, or None if snippet parsing ends.
    */
   private[cchantep] def parseSnippet[T](
-    skipTok: String,
-    debug: String => Unit,
-    outputName: String,
-    sourcePath: String,
-    line: Long,
-    writer: String => Unit,
-    head: String,
-    tail: Iterator[String]
-  ): Option[(Long, String, Iterator[String])] = {
+      skipTok: String,
+      debug: String => Unit,
+      outputName: String,
+      sourcePath: String,
+      line: Long,
+      writer: String => Unit,
+      head: String,
+      tail: Iterator[String]
+    ): Option[(Long, String, Iterator[String])] = {
     parseSnippetState[T](
-      skipTok, debug, outputName, sourcePath, line, writer, head, tail).
-      map { case (ln, hd, tl, _) => (ln, hd, tl) }
+      skipTok,
+      debug,
+      outputName,
+      sourcePath,
+      line,
+      writer,
+      head,
+      tail
+    ).map { case (ln, hd, tl, _) => (ln, hd, tl) }
   }
 
   @annotation.tailrec
   private[cchantep] def parseSnippetState[T](
-    skipTok: String,
-    debug: String => Unit,
-    outputName: String,
-    sourcePath: String,
-    line: Long,
-    writer: String => Unit,
-    head: String,
-    tail: Iterator[String]
-  ): Option[(Long, String, Iterator[String], Boolean)] = {
+      skipTok: String,
+      debug: String => Unit,
+      outputName: String,
+      sourcePath: String,
+      line: Long,
+      writer: String => Unit,
+      head: String,
+      tail: Iterator[String]
+    ): Option[(Long, String, Iterator[String], Boolean)] = {
     val s = head.indexOf(skipTok)
     val e = head.indexOf("}}}")
     val i = head.indexOf("*/")
@@ -417,32 +562,55 @@ object ScaladocExtractorPlugin extends AutoPlugin {
 
       Some((line, head.drop(s + skipTok.size), tail, false))
     } else if (i >= 0 && (e < 0 || i < e)) {
-      val msg = s"Premature end of Scaladoc snippet at line $line (${sourcePath})"
-      
+      val msg =
+        s"Premature end of Scaladoc snippet at line $line (${sourcePath})"
+
       debug(msg)
-      
+
       writer(s"// $msg")
-      
+
       Some((line, head.drop(i + 2), tail, false))
     } else if (e >= 0) {
       val (code, rem) = head.splitAt(e)
       val normalized = cleanSnippet(code)
-      if (normalized.trim.nonEmpty) writer(s"  $normalized") else writer(normalized)
+
+      if (normalized.trim.nonEmpty) {
+        writer(s"  $normalized")
+      } else {
+        writer(normalized)
+      }
+
       writer("}" /* enclosing snippet object */ )
+
       debug(s"Generating ${outputName}")
+
       Some((line, rem.drop(3), tail, true))
     } else {
       val normalized = cleanSnippet(head)
-      if (normalized.trim.nonEmpty) writer(s"  $normalized") else writer(normalized)
+
+      if (normalized.trim.nonEmpty) {
+        writer(s"  $normalized")
+      } else {
+        writer(normalized)
+      }
+
       if (tail.hasNext) {
         parseSnippetState[T](
-          skipTok, debug, outputName, sourcePath, line + 1L,
-          writer, tail.next(), tail)
+          skipTok,
+          debug,
+          outputName,
+          sourcePath,
+          line + 1L,
+          writer,
+          tail.next(),
+          tail
+        )
       } else {
         None
       }
     }
   }
 
-  private[cchantep] def cleanSnippet(in: String): String ="^[ \\t]*\\*[ ]?".r.replaceFirstIn(in, "")
+  private[cchantep] def cleanSnippet(in: String): String =
+    "^[ \\t]*\\*[ ]?".r.replaceFirstIn(in, "")
 }
