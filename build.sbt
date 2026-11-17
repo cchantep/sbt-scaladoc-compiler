@@ -6,16 +6,15 @@ organization := "cchantep"
 
 version := "0.9"
 
-crossSbtVersions := Vector("1.12.3", "2.0.1")
+scalaVersion := "2.12.21"
+crossScalaVersions := Vector("2.12.21", "3.9.0")
 
-scalaVersion := {
-  val v = (pluginCrossBuild / sbtVersion).value
-
-  if (v.startsWith("2.")) {
-    "3.8.4"
-  } else {
-    "2.12.20"
-  }
+pluginCrossBuild / sbtVersion := {
+  if (scalaBinaryVersion.value == "2.12") "1.12.3" else "2.1.0"
+}
+scalacOptions ++= {
+  if (scalaBinaryVersion.value == "2.12") Seq("-Xsource:3", "-release:8")
+  else Nil
 }
 
 libraryDependencies ++= Seq(

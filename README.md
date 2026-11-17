@@ -171,5 +171,5 @@ lazy val myProject = project
 This plugin is built using SBT.
 
 ```bash
-sbt '^ publishLocal'
+sbt '+publishLocal'
 ```
