@@ -2,7 +2,8 @@ package cchantep
 
 import scala.collection.mutable.Buffer
 
-final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification {
+final class ScaladocExtractorPluginSpec
+    extends org.specs2.mutable.Specification {
   "Scaladoc extractor plugin".title
 
   "parseString" should {
@@ -13,7 +14,8 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val head = "abc"
       val tail = Iterator.empty
 
-      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beNone
+      ScaladocExtractorPlugin
+        .parseString[String](skipTok, line, delimiter, head, tail) must beNone
     }
 
     "return Some with dropped head if delimiter is found" in {
@@ -23,7 +25,10 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val head = "abc,def"
       val tail = Iterator.empty
 
-      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beSome((1L, "def", tail))
+      ScaladocExtractorPlugin
+        .parseString[String](skipTok, line, delimiter, head, tail) must beSome(
+        (1L, "def", tail)
+      )
     }
 
     "return Some with next tail element if delimiter not found but tail hasNext" in {
@@ -33,7 +38,10 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val head = "abc"
       val tail = Iterator("def")
 
-      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beSome((2L, "def", tail))
+      ScaladocExtractorPlugin
+        .parseString[String](skipTok, line, delimiter, head, tail) must beSome(
+        (2L, "def", tail)
+      )
     }
 
     "handle delimiter at start of string" in {
@@ -43,7 +51,10 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val head = ",abc"
       val tail = Iterator.empty
 
-      ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail) must beSome((1L, "abc", tail))
+      ScaladocExtractorPlugin
+        .parseString[String](skipTok, line, delimiter, head, tail) must beSome(
+        (1L, "abc", tail)
+      )
     }
 
     "handle multiple delimiters in string" in {
@@ -52,14 +63,17 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
       val delimiter = ","
       val head = "abc,def,ghi"
       val tail = Iterator.empty
-      val result = ScaladocExtractorPlugin.parseString[String](skipTok, line, delimiter, head, tail)
+      val result = ScaladocExtractorPlugin
+        .parseString[String](skipTok, line, delimiter, head, tail)
       result must beSome((1L, "def,ghi", tail))
     }
   }
-  
+
   "cleanSnippet" should {
     "remove leading spaces and star" in {
-      ScaladocExtractorPlugin.cleanSnippet("   * some code") must_=== "some code"
+      ScaladocExtractorPlugin.cleanSnippet(
+        "   * some code"
+      ) must_=== "some code"
     }
 
     "remove only leading star if no spaces" in {
@@ -67,7 +81,9 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
     }
 
     "not remove star in middle of string" in {
-      ScaladocExtractorPlugin.cleanSnippet("  some * code") must_=== "  some * code"
+      ScaladocExtractorPlugin.cleanSnippet(
+        "  some * code"
+      ) must_=== "  some * code"
     }
 
     "handle empty string" in {
@@ -115,7 +131,9 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         tail
       )
 
-      debugMsgs.exists(_.contains("Premature end of Scaladoc snippet")) must beTrue and {
+      debugMsgs.exists(
+        _.contains("Premature end of Scaladoc snippet")
+      ) must beTrue and {
         output.exists(_.startsWith("// Premature end")) must beTrue
       } and {
         result must beSome((10L, "", tail))
@@ -192,7 +210,7 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         head,
         tail
       )
-      
+
       output.exists(_.contains("val x = 1")) must beTrue and {
         result must beNone
       }
@@ -324,7 +342,8 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
         " */",
         "object Dummy { def foo = 42 }"
       )
-      val nameToWriter: String => (String => Unit) = _ => (s => generated.append(s))
+      val nameToWriter: String => (String => Unit) =
+        _ => (s => generated.append(s))
 
       cchantep.ScaladocExtractorPlugin.parse[String](
         skipTok,
@@ -342,15 +361,15 @@ final class ScaladocExtractorPluginSpec extends org.specs2.mutable.Specification
 
       val expected =
         "package scaladocextractor\r\n" +
-        "\r\n" + // blank line after package with 5 spaces
-        "/* Dummy.scala, ln 5 */\r\n" +
-        "object DummyOutput5Snippet {\r\n" +
-        "\r\n" + // blank line before enum with 5 spaces
-        "  enum Color:\r\n" +
-        "    case Red, Green, Blue\r\n" +
-        "    val valueOf: String => Option[Color] = EnumHelper.strictValueOf[Color]\r\n" +
-        "\r\n" + // blank line after enum block with 5 spaces
-        "}" // closing object
+          "\r\n" + // blank line after package with 5 spaces
+          "/* Dummy.scala, ln 5 */\r\n" +
+          "object DummyOutput5Snippet {\r\n" +
+          "\r\n" + // blank line before enum with 5 spaces
+          "  enum Color:\r\n" +
+          "    case Red, Green, Blue\r\n" +
+          "    val valueOf: String => Option[Color] = EnumHelper.strictValueOf[Color]\r\n" +
+          "\r\n" + // blank line after enum block with 5 spaces
+          "}" // closing object
 
       generated.mkString("\r\n") must_=== expected
     }
